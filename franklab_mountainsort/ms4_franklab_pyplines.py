@@ -371,13 +371,14 @@ def add_curation_tags(dataset_dir, output_dir, firing_rate_thresh=0.01,
         peak_snr_thresh=peak_snr_thresh, mv2file='')
 
 
-def recalc_metrics(dataset_dir, output_dir, firings_in='firings_processed.json',
-                   metrics_to_update='metrics_tagged.json',
+def recalc_metrics(dataset_dir, output_dir, firings_in='firings_processed.mda',
+                   metrics_to_update='metrics_processed.json',
                    firing_rate_thresh=0.01, isolation_thresh=0.95,
                    noise_overlap_thresh=0.03,
-                   peak_snr_thresh=1.5, mv2_file='', opts=None):
+                   peak_snr_thresh=1.5, mv2_file='', manual_only=True):
     '''post-merge, should recalculate metrics and update tags (both tags based
-    on thresholds and any manually added ones, stored in the mv2)
+    on thresholds and any manually added ones, stored in the mv2). If manual_only==True, 
+    adds the tag “mua” to clusters that do not meet the criteria to be considered as single units
 
     Parameters
     ----------
@@ -393,18 +394,16 @@ def recalc_metrics(dataset_dir, output_dir, firings_in='firings_processed.json',
         Fraction of “noise events” in a cluster.
     peak_snr_thresh : float, optional
     mv2_file : str, optional
-    opts : None or dict, optional
+    manual_only :bool, weather to only keep manual tags or further threshold (see above), optional
 
     '''
-    if opts is None:
-        opts = {}
 
     ds_params = read_dataset_params(dataset_dir)
 
     compute_cluster_metrics(
         timeseries=os.path.join(output_dir, 'pre.mda.prv'),
         firings=os.path.join(output_dir, firings_in),
-        metrics_to_update=os.path.join(output_dir, metrics_to_update),
+        metrics_out=os.path.join(output_dir, metrics_to_update),
         samplerate=ds_params['samplerate'])
 
     tagged_curation(
@@ -415,8 +414,100 @@ def recalc_metrics(dataset_dir, output_dir, firings_in='firings_processed.json',
         noise_overlap_thresh=noise_overlap_thresh,
         peak_snr_thresh=peak_snr_thresh,
         mv2file=mv2_file,
-        opts=opts
+        manual_only=manual_only
     )
+
+def recalc_metrics_epoch_electrode(params,
+                    opts=None,rm_segment_intermediates=True,
+                    updated_mda='firings_processed.mda',
+                    mv2_file='manualcuration',metrics_to_update='metrics_processed_epoch',manual_only=True):
+    '''Sort by timesegments, then join any matching clusters
+
+    Parameters
+    ----------
+    dataset_dir : str
+    output_dir : str
+    geom : None or list, optional
+    rm_segment_intermediates : bool, optional
+    opt : dict or None, optional
+    updated_mda:
+    mda_opt : dict or None, optional
+    metrics_to_update: DO NOT include .json as it will be appended in the code
+
+    '''
+    output_dir=params[0]
+    mda_opts=params[1]
+
+    if mda_opts is None:
+        mda_opts = {}
+    if opts is None:
+        opts = {}
+
+    # Fetch dataset parameters
+    ds_params = read_dataset_params(output_dir)
+    has_keys = {'anim', 'date', 'ntrode', 'data_location'}.issubset(mda_opts)
+
+
+    if has_keys:
+        anim=mda_opts['anim']
+        date=mda_opts['date']
+        ntrode=mda_opts['ntrode']
+        log_file = os.path.join(output_dir, f'{anim}_{date}_nt{ntrode}.log')
+        logger_ = getLogger(log_file)
+        logger_.info(
+            'Finding list of mda file from mda directories of'
+            f'date:{date}, ntrode:{ntrode}')
+        mda_list = get_mda_list(
+            date, ntrode, mda_opts['data_location'])
+        # calculate time_offsets and total_duration
+        sample_offsets, total_samples = get_epoch_offsets(
+            dataset_dir=output_dir, opts={'mda_list': mda_list})
+
+    else:
+        # calculate time_offsets and total_duration
+        sample_offsets, total_samples = get_epoch_offsets(
+            dataset_dir=output_dir)
+
+    # break up preprocesed data into segments
+    firings_list = []
+    timeseries_list = []
+    for segind in range(len(sample_offsets)):
+        t1 = math.floor(sample_offsets[segind])
+        if segind == len(sample_offsets) - 1:
+            t2 = total_samples - 1
+        else:
+            t2 = math.floor(sample_offsets[segind + 1]) - 1
+
+        t1_min = t1 / ds_params['samplerate'] / 60
+        t2_min = t2 / ds_params['samplerate'] / 60
+        logger.info(f'Segment {segind + 1}: t1={t1}, t2={t2}, '
+                    f't1_min={t1_min:.3f}, t2_min={t2_min:.3f}')
+
+        pre_outpath = os.path.join(output_dir, f'pri-{segind + 1}.mda')
+        pyms_extract_segment(
+            timeseries=os.path.join(output_dir,updated_mda),
+            timeseries_out=pre_outpath,
+            t1=t1,
+            t2=t2,
+            opts=opts)
+
+        firings_outpath = os.path.join(
+            output_dir, f'firings-{segind + 1}.mda')
+
+        firings_list.append(firings_outpath)
+        timeseries_list.append(pre_outpath)
+        
+        recalc_metrics(output_dir,output_dir,firings_in=firings_outpath,
+            metrics_to_update=metrics_to_update+{segind + 1}+'.json',mv2_file=mv2_file,manual_only=True)
+
+    if rm_segment_intermediates:
+        clear_seg_files(
+            timeseries_list=timeseries_list,
+            firings_list=firings_list
+        )
+        
+        
+
 
 
 def extract_clips(dataset_dir, output_dir, clip_size=45, opts=None):
