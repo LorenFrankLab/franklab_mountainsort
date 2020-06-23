@@ -187,7 +187,7 @@ def compute_cluster_metrics(timeseries, firings, metrics_out, samplerate,
     firings : str
         Filepath to `firings_raw.mda` file
     metrics_out : str
-        Filepath to `metrics_raw.json` file
+        Filepath to the output metrics file
     samplerate : float
     opts : None or dict, optional
 
@@ -230,15 +230,14 @@ def compute_cluster_metrics(timeseries, firings, metrics_out, samplerate,
             'metrics_list': [metrics1, metrics2]
         },
         {
-            'metrics_out': metrics_out  # True #metrics_out
+            'metrics_out': metrics_out  # True
         },
         {},
         opts
     )
 
+
 # UNTESTED?UNUSED BY AKG
-
-
 def automated_curation(firings, cluster_metrics, firings_out, opts=None):
     '''
 
@@ -307,47 +306,8 @@ def pyms_merge_burst_parents(firings, metrics, firings_out, opts=None):
     )
 
 
-def tagged_curation(cluster_metrics, metrics_tagged,
-                    firing_rate_thresh=0.01, isolation_thresh=0.95,
-                    noise_overlap_thresh=0.03, peak_snr_thresh=1.5,
-                    mv2file='', manual_only=True):
-    '''
 
-    Parameters
-    ----------
-    cluster_metrics : str
-        Filepath
-    metrics_tagged : str
-        Filepath
-    firing_rate_thresh : float, optional
-    isolation_thresh : float, optional
-    noise_overlap_thresh : float, optional
-    peak_snr_thresh : float, optional
-    mv2file : str, optional
-    manual_only : None or dict, optional
-
-    '''
-    return mlp.runProcess(
-        'pyms.add_curation_tags',
-        {
-            'metrics': cluster_metrics
-        },
-        {
-            'metrics_tagged': metrics_tagged
-        },
-        {
-            'firing_rate_thresh': firing_rate_thresh,
-            'isolation_thresh': isolation_thresh,
-            'noise_overlap_thresh': noise_overlap_thresh,
-            'peak_snr_thresh': peak_snr_thresh,
-            'mv2file': mv2file,
-            'manual_only': manual_only
-        },
-        {}
-    )
-
-
-def get_mda_list(animal, date, ntrode, data_location):
+def get_mda_list(date, ntrode, data_location):
     '''
 
     Parameters

@@ -19,14 +19,16 @@ import math
 import os
 import subprocess
 from logging import getLogger
+import pathlib
 
 from franklab_mountainsort.ms4_franklab_proc2py import (
     bandpass_filter, clear_seg_files, compute_cluster_metrics,
     get_epoch_offsets, get_mda_list, mask_out_artifacts, ms4alg,
     pyms_extract_clips, pyms_extract_segment, read_dataset_params,
-    tagged_curation, whiten)
+    whiten)
 from franklab_msdrift.p_anneal_segments import \
     anneal_segments as pyms_anneal_segs
+from franklab_mountainsort.helper import partial_timeseries
 
 from franklab_mstaggedcuration.p_add_curation_tags import \
     add_curation_tags as pyms_add_curation_tags
@@ -280,6 +282,7 @@ def ms4_sort_on_segs(dataset_dir, output_dir, geom=None,
         timeseries_list.append(pre_outpath)
 
     firings_out_final = os.path.join(output_dir, 'firings_raw.mda')
+    txt_out = os.path.join(output_dir, 'firings_raw_anneal_log.json')
     # sample_offsets have to be converted into a string to be properly passed
     # into the processor
     str_sample_offsets = ','.join(map(str, sample_offsets))
@@ -290,6 +293,7 @@ def ms4_sort_on_segs(dataset_dir, output_dir, geom=None,
         timeseries_list=timeseries_list,
         firings_list=firings_list,
         firings_out=firings_out_final,
+        text_out=txt_out,
         dmatrix_out=[],
         k1_dmatrix_out=[],
         k2_dmatrix_out=[],
@@ -312,6 +316,13 @@ def ms4_sort_on_segs(dataset_dir, output_dir, geom=None,
         samplerate=ds_params['samplerate'],
         opts=opts
     )
+    
+    recalc_metrics_epoch_electrode(
+        params=('',output_dir,'',mda_opts),
+        rm_segment_intermediates=rm_segment_intermediates,
+        updated_mda='firings_raw.mda',
+        mv2_file='',
+        manual_only=False)
 
 
 def merge_burst_parents(dataset_dir, output_dir):
@@ -337,23 +348,23 @@ def merge_burst_parents(dataset_dir, output_dir):
         samplerate=ds_params['samplerate'])
 
 
-def add_curation_tags(dataset_dir, output_dir, firing_rate_thresh=0.01,
+def add_curation_tags(metrics_in='',metrics_out='',firing_rate_thresh=0.01,
                       isolation_thresh=0.95, noise_overlap_thresh=0.03,
-                      peak_snr_thresh=1.5, metrics_input='metrics_raw.json',
-                      metrics_output='metrics_tagged.json'):
+                      peak_snr_thresh=1.5,mv2file='',manual_only=False):
     '''
 
     Parameters
     ----------
-    dataset_dir : str
-    output_dir : str
-    firing_rate_thresh : float, optional
-    isolation_thresh : float, optional
-    noise_overlap_thresh : float, optional
-    peak_snr_thresh : float, optional
-    metrics_input : str, optional
-    metrics_output : str, optional
-    opts : None or dict, optional
+    metrics_in : str, file path to the metrics file to update
+    metrics_out : str, file path to the updated output metrics file
+    firing_rate_thresh : float, optional, default is 0.01
+    isolation_thresh : float, optional, default is 0.95
+    noise_overlap_thresh : float, optional, default is 0.03
+    peak_snr_thresh : float, optional, default is 1.5
+    mv2_file : str, optional. If provided, manual curation tags will be copied.
+    manual_only :bool, optional.
+        Setting True won't apply hard threshold and will simply copy tags from mv2 if you supply any.
+        Setting False if you want to use default threshold lines to do the tags. 
 
     Notes
     -----
@@ -363,88 +374,123 @@ def add_curation_tags(dataset_dir, output_dir, firing_rate_thresh=0.01,
 
     '''
     pyms_add_curation_tags(
-        metrics=os.path.join(dataset_dir, metrics_input),
-        metrics_tagged=os.path.join(output_dir, metrics_output),
+        metrics=metrics_in,
+        metrics_tagged=metrics_out,
         firing_rate_thresh=firing_rate_thresh,
         isolation_thresh=isolation_thresh,
         noise_overlap_thresh=noise_overlap_thresh,
-        peak_snr_thresh=peak_snr_thresh, mv2file='')
+        peak_snr_thresh=peak_snr_thresh, mv2file=mv2file,manual_only=manual_only)
 
 
-def recalc_metrics(dataset_dir, output_dir, firings_in='firings_processed.mda',
-                   metrics_to_update='metrics_processed.json',
-                   firing_rate_thresh=0.01, isolation_thresh=0.95,
-                   noise_overlap_thresh=0.03,
-                   peak_snr_thresh=1.5, mv2_file='', manual_only=True):
-    '''post-merge, should recalculate metrics and update tags (both tags based
-    on thresholds and any manually added ones, stored in the mv2). If manual_only==True, 
-    adds the tag “mua” to clusters that do not meet the criteria to be considered as single units
+def recalc_metrics(mountoutput_dir,output_dir,raw_data_dir='',firings_in='firings_processed.mda',
+        metrics_to_update='',mv2_file='', firing_rate_thresh=0.01, isolation_thresh=0.95,noise_overlap_thresh=0.03,peak_snr_thresh=1.5,manual_only=True):
+    '''used post merging/annealing/curation to recalculate metrics and update tags (both tags based
+    on thresholds and any manually added ones, stored in the mv2, which is optional to provide).
 
     Parameters
     ----------
-    dataset_dir : str
-    output_dir : str
-    firings_in : str, optional
-    metrics_to_update : str, optional
-    firing_rate_thresh : float, optional
+    mountoutput_dir : str, mountain sort output folder.
+    output_dir : str, where the output of metric file will be.
+    raw_data_dir : str, (optional) usually the tmp folder.
+    firings_in : str, optional, which kind of mda to use. default is "firings_processed.mda"
+    metrics_to_update : str, ooutput file name
+    mv2_file : str, optional. Path to mv2 file. If provided, manual curation tags will be copied.
+    firing_rate_thresh : float, optional, default is 0.01
         Clusters less than the firing rate threshold is excluded (spikes / s )
-    isolation_thresh : float, optional
+    isolation_thresh : float, optional, default is 0.95
         Distance to a cluster of noise.
-    noise_overlap_thresh : float, optional
+    noise_overlap_thresh : float, optional, default is 0.03
         Fraction of “noise events” in a cluster.
-    peak_snr_thresh : float, optional
-    mv2_file : str, optional
-    manual_only :bool, weather to only keep manual tags or further threshold (see above), optional
+    peak_snr_thresh : float, optional, default is 1.5
+    manual_only :bool, optional. 
+                Setting True won't apply hard threshold and will simply copy tags from mv2 if you supply any.
+                Setting False if you want to use default threshold lines to do the tags. 
 
     '''
+    ds_params = read_dataset_params(mountoutput_dir)
+    f = open(os.path.join(mountoutput_dir, 'pre.mda.prv'), "r")
+    prv=json.load(f)
+    p = pathlib.Path(prv['original_path'])
 
-    ds_params = read_dataset_params(dataset_dir)
+    if len(raw_data_dir)==0:
+        timeseries_in=prv['original_path']
+    else:
+        timeseries_in=os.path.join(raw_data_dir, p.parts[-1])
 
+    print('output_dir',output_dir)
     compute_cluster_metrics(
-        timeseries=os.path.join(output_dir, 'pre.mda.prv'),
-        firings=os.path.join(output_dir, firings_in),
+        timeseries=timeseries_in,
+        firings=os.path.join(mountoutput_dir, firings_in),
         metrics_out=os.path.join(output_dir, metrics_to_update),
         samplerate=ds_params['samplerate'])
 
-    tagged_curation(
-        cluster_metrics=os.path.join(dataset_dir, metrics_to_update),
-        metrics_tagged=os.path.join(output_dir, metrics_to_update),
-        firing_rate_thresh=firing_rate_thresh,
-        isolation_thresh=isolation_thresh,
-        noise_overlap_thresh=noise_overlap_thresh,
-        peak_snr_thresh=peak_snr_thresh,
-        mv2file=mv2_file,
-        manual_only=manual_only
-    )
+    add_curation_tags(metrics_in=os.path.join(output_dir, metrics_to_update),
+            metrics_out=os.path.join(output_dir, metrics_to_update),
+            firing_rate_thresh=firing_rate_thresh,
+            isolation_thresh=isolation_thresh, 
+            noise_overlap_thresh=noise_overlap_thresh,
+            peak_snr_thresh=peak_snr_thresh,
+            mv2file=mv2_file,
+            manual_only=manual_only)
 
-def recalc_metrics_epoch_electrode(params,
-                    opts=None,rm_segment_intermediates=True,
+def recalc_metrics_epoch_electrode(params,rm_segment_intermediates=True,
                     updated_mda='firings_processed.mda',
-                    mv2_file='manualcuration',metrics_to_update='metrics_processed_epoch',manual_only=True):
-    '''Sort by timesegments, then join any matching clusters
+                    mv2_file='',metrics_to_update='metrics_processed_epoch',
+                    firing_rate_thresh=0.01, isolation_thresh=0.95,noise_overlap_thresh=0.03,peak_snr_thresh=1.5,manual_only=True):
+    '''This function is called by core.recalc_metrics_epoch.
 
     Parameters
     ----------
-    dataset_dir : str
-    output_dir : str
-    geom : None or list, optional
-    rm_segment_intermediates : bool, optional
-    opt : dict or None, optional
-    updated_mda:
-    mda_opt : dict or None, optional
+    params: a list of tuple, each tuple is
+            (data_dir, ...usually the temp folder
+            mountainlab_output_dir,
+            output_dir, ...can be '',
+            mda_opts,...dict or None, optional)
+    rm_segment_intermediates : bool, optional. If true, intermediate files will be removed.
+    updated_mda: the firing.mda file to be used for calculating the metric
+    mv2_file: optional. manual tags, automated tags will be over written by manual tags in mv2 files only if manual_only is set to True
     metrics_to_update: DO NOT include .json as it will be appended in the code
+    firing_rate_thresh: float, default 0.01 spikes/s. under which rate will be excluded if manual_only=False
+    isolation_thresh: float, default 0.95. Fraction of events in this cluster that are closer to other clusters.
+    noise_overlap_thresh: float, default 0.03. Fraction of events in this cluster that are noise.
+    peak_snr_thresh: float
+    manual_only: bool. optional. default=TrueSetting True won't apply hard threshold and will simply copy tags from mv2 if you supply any.
+                 Setting False if you want to use default threshold lines to do the tags. 
 
     '''
-    output_dir=params[0]
-    mda_opts=params[1]
+    data_dir=params[0]
+    mountainlab_output_dir=params[1]
+    output_dir=params[2]
+    mda_opts=params[3]
+
+    if len(output_dir)==0:
+        output_dir=os.path.join(mountainlab_output_dir,'metrics')
+        try:  
+            os.mkdir(output_dir)  
+        except OSError as error:  
+            print(error) 
+    
 
     if mda_opts is None:
         mda_opts = {}
-    if opts is None:
-        opts = {}
 
     # Fetch dataset parameters
-    ds_params = read_dataset_params(output_dir)
+    try:
+        ds_params = read_dataset_params(mountainlab_output_dir)
+    except FileNotFoundError:
+        print('Cannot find data in'+mountainlab_output_dir)
+        print('This electrode might not be processed. Skipping electrode...')
+
+        anim=mda_opts['anim']
+        date=mda_opts['date']
+        ntrode=mda_opts['ntrode']
+        log_file = os.path.join(output_dir, f'{anim}_{date}_nt{ntrode}.log')
+        logger_ = getLogger(log_file)
+        logger_.info(
+            'Cannot find params file for this electrode on this day'
+            f'date:{date}, ntrode:{ntrode}')
+        return
+
     has_keys = {'anim', 'date', 'ntrode', 'data_location'}.issubset(mda_opts)
 
 
@@ -460,54 +506,63 @@ def recalc_metrics_epoch_electrode(params,
         mda_list = get_mda_list(
             date, ntrode, mda_opts['data_location'])
         # calculate time_offsets and total_duration
-        sample_offsets, total_samples = get_epoch_offsets(
-            dataset_dir=output_dir, opts={'mda_list': mda_list})
+        sample_offsets, total_samples = get_epoch_offsets('',opts={'mda_list': mda_list})
 
     else:
         # calculate time_offsets and total_duration
         sample_offsets, total_samples = get_epoch_offsets(
-            dataset_dir=output_dir)
+            dataset_dir=mountainlab_output_dir)
 
     # break up preprocesed data into segments
     firings_list = []
-    timeseries_list = []
+    t1_all=[]
+    t2_all=[]
     for segind in range(len(sample_offsets)):
         t1 = math.floor(sample_offsets[segind])
+        t1_all.append(t1)
         if segind == len(sample_offsets) - 1:
             t2 = total_samples - 1
         else:
             t2 = math.floor(sample_offsets[segind + 1]) - 1
+        t2_all.append(t2)
 
         t1_min = t1 / ds_params['samplerate'] / 60
         t2_min = t2 / ds_params['samplerate'] / 60
         logger.info(f'Segment {segind + 1}: t1={t1}, t2={t2}, '
                     f't1_min={t1_min:.3f}, t2_min={t2_min:.3f}')
 
-        pre_outpath = os.path.join(output_dir, f'pri-{segind + 1}.mda')
-        pyms_extract_segment(
-            timeseries=os.path.join(output_dir,updated_mda),
-            timeseries_out=pre_outpath,
-            t1=t1,
-            t2=t2,
-            opts=opts)
-
-        firings_outpath = os.path.join(
-            output_dir, f'firings-{segind + 1}.mda')
+        if not len(output_dir)==0:
+            firings_outpath = os.path.join(
+                output_dir, f'date{date}-n{ntrode}-firings-{segind + 1}.mda')
+        else:
+            firings_outpath = os.path.join(
+                mountainlab_output_dir, f'date{date}-n{ntrode}-firings-{segind + 1}.mda')
+            
 
         firings_list.append(firings_outpath)
-        timeseries_list.append(pre_outpath)
-        
-        recalc_metrics(output_dir,output_dir,firings_in=firings_outpath,
-            metrics_to_update=metrics_to_update+{segind + 1}+'.json',mv2_file=mv2_file,manual_only=True)
+
+    partial_timeseries(
+            timeseries=os.path.join(mountainlab_output_dir,updated_mda),
+            timeseries_out_all=firings_list,
+            t1_all=t1_all,
+            t2_all=t2_all)
+    if len(mv2_file)>0:
+        mv2_file_path=os.path.join(mountainlab_output_dir,mv2_file)
+    else:
+        mv2_file_path=''
+
+    for segind in range(len(sample_offsets)):
+        # make outputs
+        recalc_metrics(mountainlab_output_dir,output_dir,raw_data_dir=data_dir,firings_in=firings_list[segind],
+            metrics_to_update=metrics_to_update+f'_nt{ntrode:02d}_epoch{segind + 1}'+'.json', 
+            mv2_file=mv2_file_path,firing_rate_thresh=firing_rate_thresh, isolation_thresh=isolation_thresh,noise_overlap_thresh=noise_overlap_thresh,peak_snr_thresh=peak_snr_thresh,manual_only=True)
 
     if rm_segment_intermediates:
         clear_seg_files(
-            timeseries_list=timeseries_list,
+            timeseries_list=[],
             firings_list=firings_list
         )
         
-        
-
 
 
 def extract_clips(dataset_dir, output_dir, clip_size=45, opts=None):
