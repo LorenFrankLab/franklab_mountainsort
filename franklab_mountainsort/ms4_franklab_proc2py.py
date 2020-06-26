@@ -305,9 +305,47 @@ def pyms_merge_burst_parents(firings, metrics, firings_out, opts=None):
         opts
     )
 
+def tagged_curation(cluster_metrics, metrics_tagged,
+                    firing_rate_thresh=0.01, isolation_thresh=0.95,
+                    noise_overlap_thresh=0.03, peak_snr_thresh=1.5,
+                    mv2file='', opts=None):
+    '''
+    Parameters
+    ----------
+    cluster_metrics : str
+        Filepath
+    metrics_tagged : str
+        Filepath
+    firing_rate_thresh : float, optional
+    isolation_thresh : float, optional
+    noise_overlap_thresh : float, optional
+    peak_snr_thresh : float, optional
+    mv2file : str, optional
+    opts : None or dict, optional
+    '''
+    if opts is None:
+        opts = {}
+    return mlp.runProcess(
+        'pyms.add_curation_tags',
+        {
+            'metrics': cluster_metrics
+        },
+        {
+            'metrics_tagged': metrics_tagged
+        },
+        {
+            'firing_rate_thresh': firing_rate_thresh,
+            'isolation_thresh': isolation_thresh,
+            'noise_overlap_thresh': noise_overlap_thresh,
+            'peak_snr_thresh': peak_snr_thresh,
+            'mv2file': mv2file,
+        },
+        opts
+    )
 
 
-def get_mda_list(date, ntrode, data_location):
+
+def get_mda_list(anim, date, ntrode, data_location):
     '''
 
     Parameters

@@ -348,20 +348,25 @@ def merge_burst_parents(dataset_dir, output_dir):
         samplerate=ds_params['samplerate'])
 
 
-def add_curation_tags(metrics_in='',metrics_out='',firing_rate_thresh=0.01,
-                      isolation_thresh=0.95, noise_overlap_thresh=0.03,
-                      peak_snr_thresh=1.5,mv2file='',manual_only=False):
+def add_curation_tags(dataset_dir, output_dir,
+                    firing_rate_thresh=0.01,
+                    isolation_thresh=0.95, noise_overlap_thresh=0.03,
+                    peak_snr_thresh=1.5,
+                    metrics_input='',metrics_output='',
+                    mv2file='',manual_only=False):
     '''
 
     Parameters
     ----------
-    metrics_in : str, file path to the metrics file to update
-    metrics_out : str, file path to the updated output metrics file
+    dataset_dir : str, path to "metrics_input"
+    output_dir: str, path to "metrics_output"
     firing_rate_thresh : float, optional, default is 0.01
     isolation_thresh : float, optional, default is 0.95
     noise_overlap_thresh : float, optional, default is 0.03
     peak_snr_thresh : float, optional, default is 1.5
     mv2_file : str, optional. If provided, manual curation tags will be copied.
+    metrics_input : str, file name of the metrics file to update
+    metrics_output : str, file name to the updated output metrics file
     manual_only :bool, optional.
         Setting True won't apply hard threshold and will simply copy tags from mv2 if you supply any.
         Setting False if you want to use default threshold lines to do the tags. 
@@ -374,8 +379,8 @@ def add_curation_tags(metrics_in='',metrics_out='',firing_rate_thresh=0.01,
 
     '''
     pyms_add_curation_tags(
-        metrics=metrics_in,
-        metrics_tagged=metrics_out,
+        metrics=os.path.join(dataset_dir, metrics_input),
+        metrics_tagged=os.path.join(output_dir, metrics_output),
         firing_rate_thresh=firing_rate_thresh,
         isolation_thresh=isolation_thresh,
         noise_overlap_thresh=noise_overlap_thresh,
@@ -424,12 +429,14 @@ def recalc_metrics(mountoutput_dir,output_dir,raw_data_dir='',firings_in='firing
         metrics_out=os.path.join(output_dir, metrics_to_update),
         samplerate=ds_params['samplerate'])
 
-    add_curation_tags(metrics_in=os.path.join(output_dir, metrics_to_update),
-            metrics_out=os.path.join(output_dir, metrics_to_update),
+    add_curation_tags(output_dir,
+            output_dir,
             firing_rate_thresh=firing_rate_thresh,
             isolation_thresh=isolation_thresh, 
             noise_overlap_thresh=noise_overlap_thresh,
             peak_snr_thresh=peak_snr_thresh,
+            metrics_input=metrics_to_update,
+            metrics_output=metrics_to_update,
             mv2file=mv2_file,
             manual_only=manual_only)
 
@@ -504,7 +511,7 @@ def recalc_metrics_epoch_electrode(params,rm_segment_intermediates=True,
             'Finding list of mda file from mda directories of'
             f'date:{date}, ntrode:{ntrode}')
         mda_list = get_mda_list(
-            date, ntrode, mda_opts['data_location'])
+            anim, date, ntrode, mda_opts['data_location'])
         # calculate time_offsets and total_duration
         sample_offsets, total_samples = get_epoch_offsets('',opts={'mda_list': mda_list})
 
