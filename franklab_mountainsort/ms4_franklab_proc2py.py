@@ -345,11 +345,12 @@ def tagged_curation(cluster_metrics, metrics_tagged,
 
 
 
-def get_mda_list(anim, date, ntrode, data_location):
+def get_mda_list(animal, date, ntrode, data_location):
     '''
 
     Parameters
     ----------
+    animal: str
     date : int
     ntrode : int
     data_location : str

@@ -12,8 +12,6 @@ import numpy as np
 import pandas as pd
 import pathlib
 
-METRICS_INPUT = 'metrics_merged.json'
-METRICS_OUTPUT = 'metrics_merged_tagged.json'
 MS_IN_SECOND = 1000
 
 
