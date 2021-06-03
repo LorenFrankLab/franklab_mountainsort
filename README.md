@@ -47,8 +47,8 @@ qt-mountainview --pre=pre.mda.prv --firings=firings_raw.mda --samplerate=30000 -
 
 ### Common Issues
 + Make sure the version of trodes you used to extract the data is the same that you recorded with.
-+ UnhandledPromiseRejectionWarning: The `sumit.json` file, located in `~/.mountainlab`, can get corrupted if something interrupts writing to that file, breaking the `.json` formatting. If this is the case, either fix the json formatting or simply remove it. Note that removing the git repo or conda environment will not fix this problem because the `.mountainlab` folder is not removed when removing these two things.
-
++ `UnhandledPromiseRejectionWarning`: The `sumit.json` file, located in `~/.mountainlab`, can get corrupted if something interrupts writing to that file, breaking the `.json` formatting. If this is the case, either fix the json formatting or simply remove it. Note that removing the git repo or conda environment will not fix this problem because the `.mountainlab` folder is not removed when removing these two things.
++ `CalledProcessError`: Similarly, the `process_cache.json`, located in `../anaconda3/envs/franklab_mountainsort/etc/mountainlab/database/`, can also get corrupted if something interrupts writing to the file. If this is the case, either fix the json formatting or simply remove it.
 ### What does `spike_sort_all` do?
 For each set of channels on an electrode:
 1. Concatenate timeseries over epochs
